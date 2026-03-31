@@ -1,98 +1,122 @@
-#!/usr/bin/env python3
-"""
-One-time setup for the file sorting daemon.
-- Creates category folders in the Downloads directory.
-- Scans existing files in Downloads and records their metadata (name, size, MIME type).
-"""
-
 import os
-import sys
-import json
+import sqlite3
+import magic
 import time
 import logging
 import pwd
-import grp
-import datetime
-from pathlib import Path
-import magic
+from datetime import datetime
 
-# Configuration
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-MARKER_FILE = os.path.join(PROJECT_DIR, ".cold_start_done")
-EXISTING_FILES_JSON = os.path.join(PROJECT_DIR, "existing_files.json")
-CATEGORIES = ["PDFs", "Docs", "Spreadsheets", "Presentations", "Archives", "Videos", "Others"]
-TEMP_EXTENSIONS = {'.part', '.crdownload', '.tmp', '.download'}
+# --- CONFIGURATION ---
+# 1. MIME Prefixes (The "Magic" check)
+MIME_PREFIXES = {
+    'video/': 'Video',
+    'audio/': 'Audio',
+    'image/': 'Image',
+    'font/': 'Font',
+}
 
-# Reuse the same function as in daemon.py
+# 2. Specific MIME/Extension Mapping (The "Filesamples.com" Structure)
+# We map both MIME types and extensions to the same target folder
+CATEGORY_MAPPING = {
+    'Document': {
+        'mimes': ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument', 'application/vnd.oasis.opendocument'],
+        'exts': ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt']
+    },
+    'Ebook': {
+        'mimes': ['application/epub+zip', 'application/x-mobipocket-ebook'],
+        'exts': ['.epub', '.mobi', '.azw3']
+    },
+    'Code': {
+        'mimes': ['text/html', 'application/json', 'application/javascript', 'application/xml', 'text/xml', 'text/csv', 'text/x-python', 'text/x-java'],
+        'exts': ['.py', '.java', '.cpp', '.c', '.h', '.js', '.ts', '.html', '.css', '.json', '.xml', '.csv', '.sql', '.sh', '.php']
+    }
+}
+
+logging.Formatter.converter = time.localtime
+
 def get_downloads_dir():
     """Determine the Downloads folder of the script owner."""
     script_uid = os.stat(__file__).st_uid
     home_dir = pwd.getpwuid(script_uid).pw_dir
     return os.path.join(home_dir, "Downloads")
 
-def create_folders(base_dir):
-    """Create category folders inside base_dir if they don't exist."""
-    for cat in CATEGORIES:
-        folder_path = os.path.join(base_dir, cat)
-        os.makedirs(folder_path, exist_ok=True)
-        print(f"Created folder: {folder_path}")
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = f"{PROJECT_DIR}/download_daemon.log"
+DB_PATH = os.path.join(PROJECT_DIR, "file_tracker.db")
 
-def gather_existing_files(downloads_dir):
-    """Scan only top-level files in downloads_dir, collect metadata."""
-    files_info = []
-    try:
-        with os.scandir(downloads_dir) as entries:
-            for entry in entries:
-                # Skip directories (including category folders)
-                if not entry.is_file():
-                    continue
-                filepath = entry.path
-                file = entry.name
-                # Skip temporary files
-                ext = os.path.splitext(file)[1].lower()
-                if ext in TEMP_EXTENSIONS:
-                    continue
-
-                try:
-                    stat = entry.stat()
-                    size = stat.st_size
-                    mime = magic.from_file(filepath, mime=True)
-
-                    files_info.append({
-                        "name": file,
-                        "size": size,
-                        "mime": mime
-                    })
-                except Exception as e:
-                    print(f"Error processing {filepath}: {e}")
-    except OSError as e:
-        print(f"Error scanning directory {downloads_dir}: {e}")
-
-    with open(EXISTING_FILES_JSON, 'w') as f:
-        json.dump(files_info, f, indent=2)
-    print(f"Saved metadata for {len(files_info)} files to {EXISTING_FILES_JSON}")
+logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
+                    format='%(asctime)s - %(message)s')
 
 def main():
-    # Check if already done
-    if os.path.exists(MARKER_FILE):
-        print("Cold start already performed. Exiting.")
-        return
 
-    downloads = get_downloads_dir()
-    if not os.path.isdir(downloads):
-        print(f"Downloads directory not found: {downloads}")
-        sys.exit(1)
+    # --- DB SETUP ---
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT,
+            filename TEXT,
+            size INTEGER,
+            data TIMESTAMP
+        )
+    ''')
+    conn.commit()
 
-    print("Creating category folders...")
-    create_folders(downloads)
+    fmagic = magic.Magic(mime=True)
 
-    print("Gathering existing file metadata...")
-    gather_existing_files(downloads)
+    # --- SCANNING ---
+    with os.scandir(get_downloads_dir()) as entries:
+        for entry in entries:
+            if not entry.is_file():
+                continue
 
-    # Mark as done
-    with open(MARKER_FILE, 'w') as f:
-        f.write("Cold start completed on " + time.strftime("%Y-%m-%d %H:%M:%S"))
-    print("Cold start completed.")
+            filepath = entry.path
+            filename = entry.name
+            ext = os.path.splitext(filename)[1].lower()
+
+            try:
+                mime_type = fmagic.from_file(filepath)
+                category = None
+
+                # PHASE 1: Check MIME Prefixes (Media/Fonts)
+                for prefix, cat in MIME_PREFIXES.items():
+                    if mime_type.startswith(prefix):
+                        category = cat
+                        break
+
+                # PHASE 2: Check Specific Mapping (MIME or Extension)
+                if not category:
+                    for cat_name, criteria in CATEGORY_MAPPING.items():
+                        # Check if MIME matches
+                        if any(m in mime_type for m in criteria['mimes']):
+                            category = cat_name
+                            break
+                        # Check if Extension matches
+                        if ext in criteria['exts']:
+                            category = cat_name
+                            break
+
+                # PHASE 3: Database Insertion
+                if category:
+                    formatted_path = f"~/{category}"
+                    file_size = entry.stat().st_size
+                    # Using isoformat() to fix Python 3.12 DeprecationWarning
+                    current_time = datetime.now().isoformat()
+
+                    cursor.execute('''
+                        INSERT INTO files (path, filename, size, data)
+                        VALUES (?, ?, ?, ?)
+                    ''', (formatted_path, filename, file_size, current_time))
+
+                    logging.info(f"Categorized: {filename} -> {category} (via {mime_type})")
+
+            except Exception as e:
+                logging.info(f"Error processing {filename}: {e}")
+
+    conn.commit()
+    conn.close()
+    logging.info("\nCold start complete.")
 
 if __name__ == "__main__":
     main()
