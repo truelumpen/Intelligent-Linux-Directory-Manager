@@ -24,6 +24,16 @@ def get_downloads_dir():
     home_dir = pwd.getpwuid(script_uid).pw_dir
     return os.path.join(home_dir, "Downloads")
 
+def get_real_user_info():
+    """Find the home directory of the actual user (hansol221)."""
+    try:
+        script_stat = os.stat(__file__)
+        user_info = pwd.getpwuid(script_stat.st_uid)
+        return user_info.pw_name, user_info.pw_dir
+    except Exception:
+        return os.getlogin(), os.path.expanduser("~")
+
+REAL_USER, USER_HOME = get_real_user_info()
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = f"{PROJECT_DIR}/download_daemon.log"
 DB_PATH = os.path.join(PROJECT_DIR, "file_tracker.db")
@@ -54,6 +64,16 @@ didn't use that file instead of deleting it
 
 # ================== Event Handler ==================
 
+def is_file_finished(filepath):
+        """Check if the file is fully written and ready to move."""
+        try:
+            if os.path.getsize(filepath) == 0: return False
+            size1 = os.path.getsize(filepath)
+            time.sleep(0.5)
+            size2 = os.path.getsize(filepath)
+            return size1 == size2
+        except OSError: return False
+
 class DownloadHandler(FileSystemEventHandler):
     def __init__(self):
         # [UPDATE: Hansol] Load AI engine into memory at startup
@@ -61,14 +81,29 @@ class DownloadHandler(FileSystemEventHandler):
         self.vectorizer = joblib.load(VECTORIZER_PATH)
 
     def on_created(self, event):
-        if event.is_directory: return
-        filepath = Path(event.src_path)
-        if filepath.suffix in TEMP_EXTENSIONS: return
-        
-        time.sleep(1) # Allow for complete file write
-        self.process_file(filepath)
+        if not event.is_directory: self.handle_event(event.src_path)
+
+    def on_moved(self, event):
+        """Catch files renamed by browsers (e.g., .crdownload -> .avi)."""
+        if not event.is_directory: self.handle_event(event.dest_path)
+
+    def handle_event(self, src_path):
+        filepath = Path(src_path)
+        if filepath.suffix.lower() in TEMP_EXTENSIONS: return
+
+        # Try to process the file as soon as it's ready
+        for _ in range(10):
+            if is_file_finished(str(filepath)):
+                self.process_file(filepath)
+                break
+            time.sleep(1)
 
     def process_file(self, filepath):
+
+        time.sleep(1)
+        if not filepath.exists():
+            return
+
         """Leader's flow + Hansol's AI movement logic."""
         try:
             filename = filepath.name
@@ -93,8 +128,7 @@ class DownloadHandler(FileSystemEventHandler):
 
             # Record in DB for the 2-hour retention task
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("INSERT INTO files VALUES (?, ?, ?, ?)", (dest_path, filename, size, datetime.now()))
-
+                conn.execute("INSERT INTO files (path, filename, size, data) VALUES (?, ?, ?, ?)", (dest_path, filename, size, datetime.now()))
             # [UPDATE: Hansol] Log with explicit local time format
             log_time = time.strftime('%Y-%m-%d %H:%M:%S')
             log_entry = f"Categorized: {filename} ({mime}) -> {category}"
