@@ -1,65 +1,66 @@
-PROMPT:
+Intelligent Linux Directory Manager
 
-I am developing an AI-powered Linux daemon using skikit-learn
+This repo is a Python project intended to run on Linux. It watches your `~/Downloads` folder and logs new downloads, and it has a one-time “cold start” that creates category folders + captures metadata for existing files.
 
-RandomForest model that will activate on a file download from the web
+The primary entry point is [main.py](main.py), which:
+- Creates a Python virtual environment under `.venv/`
+- Installs Python dependencies (scikit-learn, watchdog, python-magic, joblib, pandas)
+- Ensures `libmagic` is available (needed by `python-magic`)
+- Runs the cold start script
+- Installs + enables a `systemd` service to run the daemon in the background
 
-and categorize the file. First, I want to analyze, what are the most
+## How to run (recommended: real Linux with systemd)
 
-popular dowlnoads, and train my AI model on a large number of different
+Prereqs:
+- Linux with `systemd` (Ubuntu/Debian/Arch)
+- Python 3 (with `venv` support)
+- `sudo` access (because it writes a system service into `/etc/systemd/system/`)
 
-files. It will use this default weights in the parameters to sort the
+From the project directory:
 
-files in the Downloads during cold start. 
+1) Run the installer/launcher:
 
-Code running timeline:
+`sudo python3 main.py`
 
-1. On activation it runs the main.py script that installs all required
+2) Check status/logs:
 
-dependencies on the user's system and enables the daemon. It also calls
+`systemctl status sorty-daemon`
 
-"cold start".
+Log files are created in the project folder:
+- `download_daemon.log`
+- `downloads.txt`
 
+Cold start artifacts are also written in the project folder:
+- `.cold_start_done`
+- `existing_files.json`
 
-During the cold start, the program creates default folders in the downloads and sorts the files
+## How to run without systemd (dev mode)
 
-into those folders. The folders created are in all categories, regardles
+If you don’t have systemd (or don’t want to install a service), you can run the scripts directly:
 
-if user has the related files or not, like School, Work, Finance,
+1) Create and activate a venv:
 
-Travel. It can analyze the key words in the contents of the files. The
+`python3 -m venv .venv`
+`source .venv/bin/activate`
 
-script should use all available information, without reading the entire
+2) Install deps:
 
-file (because it might be enourmously big). But the MIMO type, sourse,
+`pip install scikit-learn watchdog python-magic joblib pandas`
 
-system state, key-words in the first 5-10Kb are essential. Program
+3) Run cold start once:
 
-should remember all this information to retrain later and become more
+`python3 cold_start.py`
 
-accurate.
+4) Start the watcher (foreground):
 
+`python3 daemon.py`
 
-After the cold start is complete, the program automatically downloads
+Stop with Ctrl+C.
 
-the new files in those folders.
+## Running on Windows
 
+This project uses Linux-specific features (`systemd`, the `pwd` module, and `libmagic`), so it won’t run natively on Windows.
 
-The model will then retrain every week or after 50 downloads. To retrain
-
-it should use the current state of where each file is located as well
-
-as the metadata. The idea here is that the program starts with
-
-pre-trained common parameters and then shifts to more used-influenced
-
-categorization without making user to do a thing except manually move
-
-the downloads to a different folder when the user doesn't agree. The two
-
-logs should be made: one for the model - to help it retrain and one for
-
-the user - to help clarify the actions of AI.
-
-
-The daemon should be able to operate in Ubuntu, debian and arch. 
+Options:
+- Use WSL2 (Ubuntu) and run in “dev mode” above. (Systemd in WSL may require extra setup depending on your Windows/WSL version.)
+- Use a Linux VM or a real Linux machine.

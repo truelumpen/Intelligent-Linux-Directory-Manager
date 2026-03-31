@@ -1,15 +1,30 @@
 #!/usr/bin/env python3
 """
-Main entry point for the daemon.
-Installs dependencies and starts the daemon in the background.
+Bootstrap script for the daemon service.
+
+Responsibilities:
+1. Create a project-local virtual environment.
+2. Install required system and Python dependencies.
+3. Run one-time cold start indexing/setup.
+4. Register and start the systemd service.
 """
+
+# =============================
+# Standard library imports
+# =============================
 import subprocess
 import sys
 import os
 import shutil
 from pathlib import Path
 
-# Map package names to their import names
+# =============================
+# Configuration constants
+# =============================
+
+# NOTE:
+# The dictionary currently maps package names to import names. The values are
+# informational and can be used for future import validation/reporting.
 # [UPDATE: Hansol] Added 'joblib' and 'pandas' for AI model inference.
 PACKAGES = {
     "scikit-learn": "sklearn",
@@ -22,7 +37,12 @@ SERVICE_NAME = "sorty-daemon"
 SERVICE_FILE = f"/etc/systemd/system/{SERVICE_NAME}.service"
 VENV_DIR = ".venv"
 
+# =============================
+# Setup helpers
+# =============================
+
 def create_virtual_env(project_dir):
+    """Create a virtual environment in the project directory."""
     venv_path = os.path.join(project_dir, VENV_DIR)
     print(f"Creating virtual env in {venv_path}...")
     try:
@@ -34,15 +54,15 @@ def create_virtual_env(project_dir):
     return venv_path
 
 def install_libmagic():
-    """Install libmagic system library using available package manager."""
+    """Install the libmagic system library using the detected package manager."""
     print("Checking for libmagic...")
 
-    # Quick check: see if 'file' command exists and works
+    # Quick check: if the `file` command works, libmagic is available.
     if shutil.which("file") and subprocess.run(["file", "--version"], capture_output=True).returncode == 0:
         print("libmagic appears to be already installed (file command found).")
         return
 
-    # Determine package manager
+    # Detect the host package manager and construct the install command.
     if shutil.which("apt-get"):
         cmd = ["apt-get", "install", "-y", "libmagic1"]
         print("Using apt-get to install libmagic...")
@@ -67,6 +87,7 @@ def install_libmagic():
         print("You may need to install it manually (e.g., 'apt-get install libmagic1').")
 
 def check_and_install_dependencies(venv_path):
+    """Install all Python dependencies into the virtual environment."""
     pip_path = os.path.join(venv_path, "bin", "pip")
     for package in PACKAGES:
         print(f"Installing {package}...")
@@ -77,7 +98,12 @@ def check_and_install_dependencies(venv_path):
             print(f"✗ Failed to install {package}: {e.stderr.decode()}")
             sys.exit(1)
 
+# =============================
+# Service registration helpers
+# =============================
+
 def write_systemd_service(project_dir, venv_path):
+    """Create the systemd service file for the daemon."""
     python_path = os.path.join(venv_path, "bin", "python")
     daemon_path = os.path.join(project_dir, "daemon.py")
 
@@ -102,6 +128,7 @@ WantedBy=multi-user.target
     print(f"✓ Created service file: {SERVICE_FILE}")
 
 def enable_and_start_service():
+    """Reload systemd and ensure the daemon is enabled and started."""
     try:
         subprocess.run(["systemctl", "daemon-reload"], check=True)
         subprocess.run(["systemctl", "enable", SERVICE_NAME], check=True)
@@ -111,13 +138,20 @@ def enable_and_start_service():
         print(f"✗ Service failed: {e}")
         sys.exit(1)
 
+# =============================
+# Main workflow
+# =============================
+
 def main():
+    """Execute the full bootstrap flow for daemon installation/startup."""
     project_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # 1) Create isolated Python environment and install dependencies.
     venv_path = create_virtual_env(project_dir)
     install_libmagic()
     check_and_install_dependencies(venv_path)
 
-    # Run one-time cold start setup
+    # 2) Run one-time cold start setup.
     print("Running cold start setup...")
     cold_start_script = os.path.join(project_dir, "cold_start.py")
     python_path = os.path.join(venv_path, "bin", "python")
@@ -128,12 +162,15 @@ def main():
         print(f"Cold start failed: {e.stderr}")
         sys.exit(1)
 
+    # 3) Ensure systemd is available before creating and managing the service.
     if (shutil.which("systemctl") is None):
         print("systemd not found")
         sys.exit(1)
 
+    # 4) Register and start daemon service.
     write_systemd_service(project_dir, venv_path)
     enable_and_start_service()
+
 
 if __name__ == "__main__":
     main()

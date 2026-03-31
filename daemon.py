@@ -1,3 +1,13 @@
+"""
+Download monitoring daemon.
+
+This service watches the Downloads directory, classifies files with a trained
+model, moves them into category directories, and records actions in SQLite.
+"""
+
+# =============================
+# Standard library imports
+# =============================
 import time
 import sys
 import logging
@@ -12,7 +22,9 @@ from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-# ================== Configuration ==================
+# =============================
+# Runtime configuration
+# =============================
 
 # [UPDATE: Hansol] Synchronize logging with the local system timezone (e.g., EST)
 # This ensures timestamps match the actual time the user sees.
@@ -25,7 +37,7 @@ def get_downloads_dir():
     return os.path.join(home_dir, "Downloads")
 
 def get_real_user_info():
-    """Find the home directory of the actual user (hansol221)."""
+    """Resolve the real user account owning this script and its home directory."""
     try:
         script_stat = os.stat(__file__)
         user_info = pwd.getpwuid(script_stat.st_uid)
@@ -47,6 +59,10 @@ logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
                     format='%(asctime)s - %(message)s')
 
 
+# =============================
+# Deferred retention policy notes
+# =============================
+
 """
 Elisei's note: potential change to just notofying the user that they
 didn't use that file instead of deleting it
@@ -62,10 +78,12 @@ didn't use that file instead of deleting it
 #                 logging.info(f"Cleanup: Deleted expired file {fpath}")
 #             conn.execute("DELETE FROM tracked_files WHERE id = ?", (fid,))
 
-# ================== Event Handler ==================
+# =============================
+# File readiness and event handling
+# =============================
 
 def is_file_finished(filepath):
-        """Check if the file is fully written and ready to move."""
+        """Return True when file size is stable and the file is ready to move."""
         try:
             if os.path.getsize(filepath) == 0: return False
             size1 = os.path.getsize(filepath)
@@ -75,12 +93,15 @@ def is_file_finished(filepath):
         except OSError: return False
 
 class DownloadHandler(FileSystemEventHandler):
+    """Watchdog event handler for classifying and moving downloaded files."""
+
     def __init__(self):
         # [UPDATE: Hansol] Load AI engine into memory at startup
         self.model = joblib.load(MODEL_PATH)
         self.vectorizer = joblib.load(VECTORIZER_PATH)
 
     def on_created(self, event):
+        """Handle new file creation events from the Downloads directory."""
         if not event.is_directory: self.handle_event(event.src_path)
 
     def on_moved(self, event):
@@ -88,6 +109,7 @@ class DownloadHandler(FileSystemEventHandler):
         if not event.is_directory: self.handle_event(event.dest_path)
 
     def handle_event(self, src_path):
+        """Gate temporary files and process finalized files when ready."""
         filepath = Path(src_path)
         if filepath.suffix.lower() in TEMP_EXTENSIONS: return
 
@@ -99,6 +121,7 @@ class DownloadHandler(FileSystemEventHandler):
             time.sleep(1)
 
     def process_file(self, filepath):
+        """Classify, move, and persist metadata for a downloaded file."""
 
         time.sleep(1)
         if not filepath.exists():
@@ -140,7 +163,12 @@ class DownloadHandler(FileSystemEventHandler):
 
 
 
+# =============================
+# Daemon entrypoint
+# =============================
+
 def main():
+    """Start filesystem monitoring and keep the daemon process alive."""
 
     logging.info(f"Daemon started")
     event_handler = DownloadHandler()
