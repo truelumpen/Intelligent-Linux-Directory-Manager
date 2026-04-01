@@ -1,8 +1,16 @@
 """
-One-time cold start scanner.
+Project: Intelligent Linux Directory Manager
+Course: CMSC 495
+Team Members: Elisei Khmelev, Han Kim, Kenneth Murray, Robert Wells, and Saad Ahmad
 
-This script scans the Downloads directory, classifies files by MIME/extension,
-and seeds the tracking database with initial file metadata.
+File: cold_start.py
+
+Description:
+This script performs the initial “cold start” process by scanning the user's
+Downloads directory and organizing existing files into categorized folders.
+It determines file categories using MIME types, file extensions, and a fallback
+machine learning model when needed. The script also logs activity and stores
+file metadata in a SQLite database for tracking and future reference.
 """
 
 # =============================
