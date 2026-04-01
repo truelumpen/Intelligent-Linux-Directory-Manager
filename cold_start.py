@@ -1,3 +1,13 @@
+"""
+One-time cold start scanner.
+
+This script scans the Downloads directory, classifies files by MIME/extension,
+and seeds the tracking database with initial file metadata.
+"""
+
+# =============================
+# Standard library and third-party imports
+# =============================
 import os
 import sqlite3
 import magic
@@ -6,8 +16,11 @@ import logging
 import pwd
 from datetime import datetime
 
-# --- CONFIGURATION ---
-# 1. MIME Prefixes (The "Magic" check)
+# =============================
+# Classification configuration
+# =============================
+
+# 1) MIME prefix routing (broad media/font detection).
 MIME_PREFIXES = {
     'video/': 'Video',
     'audio/': 'Audio',
@@ -15,8 +28,8 @@ MIME_PREFIXES = {
     'font/': 'Font',
 }
 
-# 2. Specific MIME/Extension Mapping (The "Filesamples.com" Structure)
-# We map both MIME types and extensions to the same target folder
+# 2) Explicit MIME and extension routing.
+# Both MIME types and extensions map to the same Target Folder.
 CATEGORY_MAPPING = {
     'Document': {
         'mimes': ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument', 'application/vnd.oasis.opendocument'],
@@ -32,13 +45,19 @@ CATEGORY_MAPPING = {
     }
 }
 
+# Keep logging timestamps aligned with local system time.
 logging.Formatter.converter = time.localtime
 
 def get_downloads_dir():
-    """Determine the Downloads folder of the script owner."""
+    """Return the Downloads directory for the user owning this script file."""
     script_uid = os.stat(__file__).st_uid
     home_dir = pwd.getpwuid(script_uid).pw_dir
     return os.path.join(home_dir, "Downloads")
+
+
+# =============================
+# Paths and logging setup
+# =============================
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = f"{PROJECT_DIR}/download_daemon.log"
@@ -47,9 +66,15 @@ DB_PATH = os.path.join(PROJECT_DIR, "file_tracker.db")
 logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
                     format='%(asctime)s - %(message)s')
 
-def main():
 
-    # --- DB SETUP ---
+# =============================
+# Cold start workflow
+# =============================
+
+def main():
+    """Populate the tracking database using a one-time Downloads scan."""
+
+    # Phase 1: Ensure the tracking table exists.
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -65,7 +90,7 @@ def main():
 
     fmagic = magic.Magic(mime=True)
 
-    # --- SCANNING ---
+    # Phase 2: Scan files and derive a folder.
     with os.scandir(get_downloads_dir()) as entries:
         for entry in entries:
             if not entry.is_file():
@@ -79,16 +104,16 @@ def main():
                 mime_type = fmagic.from_file(filepath)
                 category = None
 
-                # PHASE 1: Check MIME Prefixes (Media/Fonts)
+                # Step 2a: Route using MIME prefix
                 for prefix, cat in MIME_PREFIXES.items():
                     if mime_type.startswith(prefix):
                         category = cat
                         break
 
-                # PHASE 2: Check Specific Mapping (MIME or Extension)
+                # Step 2b: Route using explicit MIME or extension mappings.
                 if not category:
                     for cat_name, criteria in CATEGORY_MAPPING.items():
-                        # Check if MIME matches
+                        # Match known MIME signatures first.
                         if any(m in mime_type for m in criteria['mimes']):
                             category = cat_name
                             break
@@ -101,7 +126,7 @@ def main():
                 if category:
                     formatted_path = f"~/{category}"
                     file_size = entry.stat().st_size
-                    # Using isoformat() to fix Python 3.12 DeprecationWarning
+                    # Use ISO format to avoid Python 3.12 datetime deprecation warnings.
                     current_time = datetime.now().isoformat()
 
                     cursor.execute('''
@@ -114,6 +139,7 @@ def main():
             except Exception as e:
                 logging.info(f"Error processing {filename}: {e}")
 
+    # Finalize and close the database session.
     conn.commit()
     conn.close()
     logging.info("\nCold start complete.")
