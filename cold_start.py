@@ -14,6 +14,8 @@ import magic
 import time
 import logging
 import pwd
+import shutil
+import joblib
 from datetime import datetime
 
 # =============================
@@ -22,20 +24,20 @@ from datetime import datetime
 
 # 1) MIME prefix routing (broad media/font detection).
 MIME_PREFIXES = {
-    'video/': 'Video',
-    'audio/': 'Audio',
-    'image/': 'Image',
+    'video/': 'Videos',
+    'audio/': 'Music',
+    'image/': 'Pictures',
     'font/': 'Font',
 }
 
 # 2) Explicit MIME and extension routing.
 # Both MIME types and extensions map to the same Target Folder.
 CATEGORY_MAPPING = {
-    'Document': {
+    'Documents': {
         'mimes': ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument', 'application/vnd.oasis.opendocument'],
         'exts': ['.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt']
     },
-    'Ebook': {
+    'Ebooks': {
         'mimes': ['application/epub+zip', 'application/x-mobipocket-ebook'],
         'exts': ['.epub', '.mobi', '.azw3']
     },
@@ -54,14 +56,25 @@ def get_downloads_dir():
     home_dir = pwd.getpwuid(script_uid).pw_dir
     return os.path.join(home_dir, "Downloads")
 
+def get_real_user_info():
+    """Resolve the real user account owning this script and its home directory."""
+    try:
+        script_stat = os.stat(__file__)
+        user_info = pwd.getpwuid(script_stat.st_uid)
+        return user_info.pw_name, user_info.pw_dir
+    except Exception:
+        return os.getlogin(), os.path.expanduser("~")
 
 # =============================
 # Paths and logging setup
 # =============================
 
+REAL_USER, USER_HOME = get_real_user_info()
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = f"{PROJECT_DIR}/download_daemon.log"
 DB_PATH = os.path.join(PROJECT_DIR, "file_tracker.db")
+MODEL_PATH = os.path.join(PROJECT_DIR, "file_classifier.pkl")
+VECTORIZER_PATH = os.path.join(PROJECT_DIR, "vectorizer.pkl")
 
 logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
                     format='%(asctime)s - %(message)s')
@@ -122,19 +135,35 @@ def main():
                             category = cat_name
                             break
 
+                file_size = entry.stat().st_size
+                # Use ISO format to avoid Python 3.12 datetime deprecation warnings.
+                current_time = datetime.now().isoformat()
+
                 # PHASE 3: Database Insertion
-                if category:
-                    formatted_path = f"~/{category}"
-                    file_size = entry.stat().st_size
-                    # Use ISO format to avoid Python 3.12 datetime deprecation warnings.
-                    current_time = datetime.now().isoformat()
+                if not category:
 
-                    cursor.execute('''
-                        INSERT INTO files (path, filename, size, data)
-                        VALUES (?, ?, ?, ?)
-                    ''', (formatted_path, filename, file_size, current_time))
+                    # Use AI prediction as a last resort
+                    model = joblib.load(MODEL_PATH)
+                    vectorizer = joblib.load(VECTORIZER_PATH)
 
-                    logging.info(f"Categorized: {filename} -> {category} (via {mime_type})")
+                    vec = vectorizer.transform([filename])
+                    category = model.predict(vec)[0]
+
+                # Create a directory for the category if doesn't exist
+                target_dir = os.path.join(USER_HOME, category)
+                if not os.path.exists(target_dir):
+                    os.makedirs(target_dir)
+
+                cursor.execute('''
+                    INSERT INTO files (path, filename, size, data)
+                    VALUES (?, ?, ?, ?)
+                ''', (target_dir, filename, file_size, current_time))
+
+                # Move the file into the right category folder
+                dest_path = os.path.join(target_dir, filename)
+                shutil.move(str(filepath), dest_path)
+
+                logging.info(f"Categorized: {filename} -> {category} (via {mime_type})")
 
             except Exception as e:
                 logging.info(f"Error processing {filename}: {e}")
