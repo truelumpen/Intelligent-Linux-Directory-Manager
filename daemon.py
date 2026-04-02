@@ -1,8 +1,17 @@
 """
-Download monitoring daemon.
+Project: Intelligent Linux Directory Manager
+Course: CMSC 495
+Team Members: Elisei Khmelev, Han Kim, Kenneth Murray, Robert Wells, and Saad Ahmad
 
-This service watches the Downloads directory, classifies files with a trained
-model, moves them into category directories, and records actions in SQLite.
+File: daemon.py
+
+Description:
+This script runs as a background daemon that continuously monitors the user's
+Downloads directory for new files. It uses a machine learning model to classify
+files, moves them into appropriate category folders, and records file metadata
+in a SQLite database. The daemon utilizes the watchdog library to detect file
+system events in real time and ensures files are fully downloaded before
+processing.
 """
 
 # =============================
