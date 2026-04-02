@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-Bootstrap script for the daemon service.
+Project: Intelligent Linux Directory Manager
+Course: CMSC 495
+Team Members: Elisei Khmelev, Han Kim, Kenneth Murray, Robert Wells, and Saad Ahmad
 
-Responsibilities:
-1. Create a project-local virtual environment.
-2. Install required system and Python dependencies.
-3. Run one-time cold start indexing/setup.
-4. Register and start the systemd service.
+File: main.py
+
+Description:
+This script serves as the main entry point for the Intelligent Linux Directory Manager.
+It initializes the application by creating a virtual environment, installing required
+dependencies (including libmagic and Python packages), and running the cold start setup.
+Additionally, it configures, enables, and starts a systemd service that runs the file
+management daemon in the background for continuous monitoring and organization.
 """
 
 # =============================
