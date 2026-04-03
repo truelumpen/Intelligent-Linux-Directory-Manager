@@ -99,13 +99,14 @@ def main():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            path TEXT,
-            filename TEXT,
-            size INTEGER,
-            data TIMESTAMP
-        )
+    CREATE TABLE IF NOT EXISTS files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT,
+        filename TEXT,
+        size INTEGER,
+        created_at TIMESTAMP,
+        last_accessed TIMESTAMP
+    )
     ''')
     conn.commit()
 
@@ -145,7 +146,7 @@ def main():
 
                 file_size = entry.stat().st_size
                 # Use ISO format to avoid Python 3.12 datetime deprecation warnings.
-                current_time = datetime.now().isoformat()
+                now = datetime.now().isoformat()
 
                 # PHASE 3: Database Insertion
                 if not category:
@@ -162,16 +163,13 @@ def main():
                 if not os.path.exists(target_dir):
                     os.makedirs(target_dir)
 
-                cursor.execute('''
-                    INSERT INTO files (path, filename, size, data)
-                    VALUES (?, ?, ?, ?)
-                ''', (target_dir, filename, file_size, current_time))
+                cursor.execute(''' INSERT INTO files (path, filename, size, created_at, last_accessed) VALUES (?, ?, ?, ?, ?) ''', (target_dir, filename, file_size, now, now))
 
                 # Move the file into the right category folder
                 dest_path = os.path.join(target_dir, filename)
                 shutil.move(str(filepath), dest_path)
 
-                logging.info(f"Categorized: {filename} -> {category} (via {mime_type})")
+                logging.info(f"Categorized: {filename} -> {category}")
 
             except Exception as e:
                 logging.info(f"Error processing {filename}: {e}")

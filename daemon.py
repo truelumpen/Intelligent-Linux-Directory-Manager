@@ -26,6 +26,7 @@ import sqlite3
 import shutil
 import joblib
 import magic
+from send2trash import send2trash
 from datetime import datetime, timedelta
 from pathlib import Path
 from watchdog.observers import Observer
@@ -38,6 +39,8 @@ from watchdog.events import FileSystemEventHandler
 # [UPDATE: Hansol] Synchronize logging with the local system timezone (e.g., EST)
 # This ensures timestamps match the actual time the user sees.
 logging.Formatter.converter = time.localtime
+INACTIVE_DAYS = 1 / (24*60) # change to 3 in PROD
+CLEANUP_INTERVAL = 60 # Change to 600 in PROD
 
 def get_downloads_dir():
     """Determine the Downloads folder of the script owner."""
@@ -67,39 +70,53 @@ TEMP_EXTENSIONS = {'.part', '.crdownload', '.tmp', '.download'}
 logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
                     format='%(asctime)s - %(message)s')
 
+# ============================
+# Update Access function
+# ============================
+
+def update_access_time(path):
+    """Update last_accessed in DB when file is modified/accessed."""
+    try:
+        atime = datetime.fromtimestamp(os.path.getatime(path))
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("UPDATE files SET last_accessed = ? WHERE path = ?", (atime, path))
+    except Exception:
+        pass
+
 
 # =============================
 # Deferred retention policy notes
 # =============================
 
-"""
-Elisei's note: potential change to just notofying the user that they
-didn't use that file instead of deleting it
-"""
-# def cleanup_expired_files():
-#     """[UPDATE: Hansol] Automated 2-hour retention policy (Test Mode)."""
-#     limit = datetime.now() - timedelta(hours=2)
-#     with sqlite3.connect(DB_PATH) as conn:
-#         expired = conn.execute("SELECT id, path FROM tracked_files WHERE date < ?", (limit.isoformat(),)).fetchall()
-#         for fid, fpath in expired:
-#             if os.path.exists(fpath):
-#                 os.remove(fpath)
-#                 logging.info(f"Cleanup: Deleted expired file {fpath}")
-#             conn.execute("DELETE FROM tracked_files WHERE id = ?", (fid,))
+def move_to_trash():
+    """Move files not accessed for INACTIVE_DAYS to Trash and remove from DB."""
+    now = datetime.now()
+    cutoff = now - timedelta(days=INACTIVE_DAYS)
+    cutoff_time = cutoff.isoformat()
 
-# =============================
-# File readiness and event handling
-# =============================
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute("SELECT id, path, filename FROM files WHERE last_accessed < ?", (cutoff_time,)).fetchall()
+
+        for fid, path, filename in rows:
+            try:
+                if os.path.exists(path):
+                    send2trash(path)
+                    logging.info(f"Moved to Trash: {filename}")
+                # Remove DB entry regardless (file may have been deleted manually)
+                conn.execute("DELETE FROM files WHERE id = ?", (fid,))
+            except Exception as e:
+                logging.error(f"Failed to trash {filename}: {e}")
 
 def is_file_finished(filepath):
-        """Return True when file size is stable and the file is ready to move."""
-        try:
-            if os.path.getsize(filepath) == 0: return False
-            size1 = os.path.getsize(filepath)
-            time.sleep(0.5)
-            size2 = os.path.getsize(filepath)
-            return size1 == size2
-        except OSError: return False
+    try:
+        if os.path.getsize(filepath) == 0:
+            return False
+        size1 = os.path.getsize(filepath)
+        time.sleep(0.5)
+        size2 = os.path.getsize(filepath)
+        return size1 == size2
+    except OSError:
+        return False
 
 class DownloadHandler(FileSystemEventHandler):
     """Watchdog event handler for classifying and moving downloaded files."""
@@ -116,6 +133,10 @@ class DownloadHandler(FileSystemEventHandler):
     def on_moved(self, event):
         """Catch files renamed by browsers (e.g., .crdownload -> .avi)."""
         if not event.is_directory: self.handle_event(event.dest_path)
+
+    def on_modified(self, event):
+        if not event.is_directory:
+            update_access_time(event.src_path)
 
     def handle_event(self, src_path):
         """Gate temporary files and process finalized files when ready."""
@@ -157,13 +178,15 @@ class DownloadHandler(FileSystemEventHandler):
             
             dest_path = os.path.join(target_dir, filename)
             shutil.move(str(filepath), dest_path)
+            now = datetime.now().isoformat()
 
             # Record in DB for the 2-hour retention task
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("INSERT INTO files (path, filename, size, data) VALUES (?, ?, ?, ?)", (dest_path, filename, size, datetime.now()))
+                conn.execute(''' INSERT INTO files (path, filename, size, created_at, last_accessed) VALUES (?, ?, ?, ?, ?) ''', (dest_path, filename, size, now, now))
+
             # [UPDATE: Hansol] Log with explicit local time format
             log_time = time.strftime('%Y-%m-%d %H:%M:%S')
-            log_entry = f"Categorized: {filename} ({mime}) -> {category}"
+            log_entry = f"Categorized: {filename} -> {category}"
             logging.info(log_entry)
             
 
@@ -186,9 +209,14 @@ def main():
     observer.start()
     
     try:
+        last_cleanup = 0
+
         while True:
-            # Check for expired files every 10 minutes
-            # cleanup_expired_files()
+            now = time.time()
+
+            if now - last_cleanup > CLEANUP_INTERVAL:  # every 10 minutes
+                move_to_trash()
+                last_cleanup = now
             time.sleep(1)
     except KeyboardInterrupt:
         observer.stop()
