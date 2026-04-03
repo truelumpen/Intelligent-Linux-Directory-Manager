@@ -26,6 +26,10 @@ import sqlite3
 import shutil
 import joblib
 import magic
+import signal
+import threading
+import queue
+from inotify_simple import INotify, flags
 from send2trash import send2trash
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -66,23 +70,13 @@ VECTORIZER_PATH = os.path.join(PROJECT_DIR, "vectorizer.pkl")
 
 TEMP_EXTENSIONS = {'.part', '.crdownload', '.tmp', '.download'}
 
+_watch_queue = queue.Queue()
+_watched_dirs_lock = threading.Lock()
+_watched_dirs = set()
+
 # [UPDATE: Hansol] Standardized logging format with local timestamps
 logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
                     format='%(asctime)s - %(message)s')
-
-# ============================
-# Update Access function
-# ============================
-
-def update_access_time(path):
-    """Update last_accessed in DB when file is modified/accessed."""
-    try:
-        atime = datetime.fromtimestamp(os.path.getatime(path))
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("UPDATE files SET last_accessed = ? WHERE path = ?", (atime, path))
-    except Exception:
-        pass
-
 
 # =============================
 # Deferred retention policy notes
@@ -134,9 +128,9 @@ class DownloadHandler(FileSystemEventHandler):
         """Catch files renamed by browsers (e.g., .crdownload -> .avi)."""
         if not event.is_directory: self.handle_event(event.dest_path)
 
-    def on_modified(self, event):
-        if not event.is_directory:
-            update_access_time(event.src_path)
+    # def on_modified(self, event):
+    #     if not event.is_directory:
+    #         update_access_time(event.src_path)
 
     def handle_event(self, src_path):
         """Gate temporary files and process finalized files when ready."""
@@ -184,6 +178,10 @@ class DownloadHandler(FileSystemEventHandler):
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(''' INSERT INTO files (path, filename, size, created_at, last_accessed) VALUES (?, ?, ?, ?, ?) ''', (dest_path, filename, size, now, now))
 
+            # Add a monitor to track if the file was used
+            dest_dir = os.path.dirname(dest_path)
+            schedule_watch_directory(dest_dir)
+
             # [UPDATE: Hansol] Log with explicit local time format
             log_time = time.strftime('%Y-%m-%d %H:%M:%S')
             log_entry = f"Categorized: {filename} -> {category}"
@@ -193,6 +191,78 @@ class DownloadHandler(FileSystemEventHandler):
         except Exception as e:
             logging.error(f"Error processing {filepath}: {e}")
 
+# =============================
+# File‑open monitoring using inotify_simple
+# =============================
+
+def schedule_watch_directory(path):
+    """Thread‑safe request to watch a directory and its subdirectories."""
+    _watch_queue.put(path)
+
+def start_open_monitor(initial_dirs, stop_event):
+    """
+    Watch given directories recursively for file open events.
+    Dynamically adds new directories from _watch_queue.
+    """
+    inotify = INotify()
+    watch_descriptors = {}
+
+    def add_watch_recursively(path):
+        """Add watch for IN_OPEN on path and all subdirs, skip if already watched."""
+        with _watched_dirs_lock:
+            if path in _watched_dirs:
+                return
+            _watched_dirs.add(path)
+        try:
+            wd = inotify.add_watch(path, flags.OPEN)
+            watch_descriptors[wd] = path
+            logging.debug(f"Watching: {path}")
+        except Exception as e:
+            logging.error(f"Failed to add watch on {path}: {e}")
+            return
+        # Recurse into subdirectories
+        for entry in os.scandir(path):
+            if entry.is_dir(follow_symlinks=False):
+                add_watch_recursively(entry.path)
+
+    # Initial watches (only Downloads)
+    for d in initial_dirs:
+        if os.path.isdir(d):
+            add_watch_recursively(d)
+        else:
+            logging.warning(f"Initial watch directory does not exist: {d}")
+
+    logging.info(f"Open monitoring active on {_watched_dirs}")
+
+    while not stop_event.is_set():
+        # Process any pending watch requests
+        try:
+            while True:
+                new_dir = _watch_queue.get_nowait()
+                if os.path.isdir(new_dir):
+                    add_watch_recursively(new_dir)
+                else:
+                    logging.debug(f"Requested watch on non-existent dir: {new_dir}")
+        except queue.Empty:
+            pass
+
+        events = inotify.read(timeout=1000)
+        for event in events:
+            if event.mask & flags.OPEN:
+                base_path = watch_descriptors.get(event.wd)
+                if base_path:
+                    full_path = os.path.join(base_path, event.name)
+                    if os.path.isdir(full_path):
+                        continue
+                    if any(full_path.lower().endswith(ext) for ext in TEMP_EXTENSIONS):
+                        continue
+                    logging.info(f"FILE OPENED: {full_path}")
+                    now = datetime.now().isoformat()
+                    with sqlite3.connect(DB_PATH) as conn:
+                        conn.execute(''' UPDATE files SET last_accessed = ? WHERE path = ?;''', (now, full_path))
+
+    inotify.close()
+    logging.info("Open monitoring stopped.")
 
 
 # =============================
@@ -208,19 +278,43 @@ def main():
     observer.schedule(event_handler, get_downloads_dir(), recursive=False)
     observer.start()
     
+    # --- Inotify for file‑open events (in a separate thread) ---
+    downloads_dir = get_downloads_dir()
+    initial_watch_dirs = [downloads_dir] if os.path.isdir(downloads_dir) else []
+
+    stop_open_event = threading.Event()
+    open_thread = threading.Thread(
+        target=start_open_monitor,
+        args=(initial_watch_dirs, stop_open_event),
+        daemon=True
+    )
+    open_thread.start()
+
+    # --- Signal handlers for clean shutdown ---
+    def shutdown(signum, frame):
+        logging.info(f"Received signal {signum}, shutting down...")
+        observer.stop()
+        if open_thread is not None:
+            stop_open_event.set()
+            open_thread.join(timeout=2)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)   # Ctrl+C also works
+
+    # --- Main loop (retention cleanup every CLEANUP_INTERVAL seconds) ---
     try:
         last_cleanup = 0
-
         while True:
             now = time.time()
-
-            if now - last_cleanup > CLEANUP_INTERVAL:  # every 10 minutes
+            if now - last_cleanup > CLEANUP_INTERVAL:
                 move_to_trash()
                 last_cleanup = now
             time.sleep(1)
     except KeyboardInterrupt:
-        observer.stop()
-    observer.join()
+        shutdown(None, None)
+    finally:
+        observer.join()
 
 if __name__ == "__main__":
     try:

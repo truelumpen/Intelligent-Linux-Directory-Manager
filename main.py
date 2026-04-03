@@ -37,7 +37,8 @@ PACKAGES = {
     "python-magic": "python-magic",
     "joblib": "joblib",
     "pandas": "pandas",
-    "send2trash": "send2trash"
+    "send2trash": "send2trash",
+    "inotify_simple": "inotify_simple"
 }
 SERVICE_NAME = "sorty-daemon"
 SERVICE_FILE = f"/etc/systemd/system/{SERVICE_NAME}.service"
