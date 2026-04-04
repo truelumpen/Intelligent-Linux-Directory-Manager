@@ -15,66 +15,20 @@ processing.
 """
 
 # =============================
-# Standard library imports
-# =============================
-import time
-import sys
-import logging
-import os
-import pwd
-import sqlite3
-import shutil
-import joblib
-import magic
-import signal
-import threading
-import queue
-from inotify_simple import INotify, flags
-from send2trash import send2trash
-from datetime import datetime, timedelta
-from pathlib import Path
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-
-# =============================
-# Runtime configuration
+# Imports from local config
 # =============================
 
-# [UPDATE: Hansol] Synchronize logging with the local system timezone (e.g., EST)
-# This ensures timestamps match the actual time the user sees.
+from config import *
+
+from watcher import schedule_watch_directory, start_open_monitor
+
+# =============================
+# Logging configuration ?? Can it be in config?
+# =============================
+
+# Keep logging timestamps aligned with local system time.
 logging.Formatter.converter = time.localtime
-INACTIVE_DAYS = 1 / (24*60) # change to 3 in PROD
-CLEANUP_INTERVAL = 60 # Change to 600 in PROD
 
-def get_downloads_dir():
-    """Determine the Downloads folder of the script owner."""
-    script_uid = os.stat(__file__).st_uid
-    home_dir = pwd.getpwuid(script_uid).pw_dir
-    return os.path.join(home_dir, "Downloads")
-
-def get_real_user_info():
-    """Resolve the real user account owning this script and its home directory."""
-    try:
-        script_stat = os.stat(__file__)
-        user_info = pwd.getpwuid(script_stat.st_uid)
-        return user_info.pw_name, user_info.pw_dir
-    except Exception:
-        return os.getlogin(), os.path.expanduser("~")
-
-REAL_USER, USER_HOME = get_real_user_info()
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = f"{PROJECT_DIR}/download_daemon.log"
-DB_PATH = os.path.join(PROJECT_DIR, "file_tracker.db")
-MODEL_PATH = os.path.join(PROJECT_DIR, "file_classifier.pkl")
-VECTORIZER_PATH = os.path.join(PROJECT_DIR, "vectorizer.pkl")
-
-TEMP_EXTENSIONS = {'.part', '.crdownload', '.tmp', '.download'}
-
-_watch_queue = queue.Queue()
-_watched_dirs_lock = threading.Lock()
-_watched_dirs = set()
-
-# [UPDATE: Hansol] Standardized logging format with local timestamps
 logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
                     format='%(asctime)s - %(message)s')
 
@@ -192,80 +146,6 @@ class DownloadHandler(FileSystemEventHandler):
             logging.error(f"Error processing {filepath}: {e}")
 
 # =============================
-# File‑open monitoring using inotify_simple
-# =============================
-
-def schedule_watch_directory(path):
-    """Thread‑safe request to watch a directory and its subdirectories."""
-    _watch_queue.put(path)
-
-def start_open_monitor(initial_dirs, stop_event):
-    """
-    Watch given directories recursively for file open events.
-    Dynamically adds new directories from _watch_queue.
-    """
-    inotify = INotify()
-    watch_descriptors = {}
-
-    def add_watch_recursively(path):
-        """Add watch for IN_OPEN on path and all subdirs, skip if already watched."""
-        with _watched_dirs_lock:
-            if path in _watched_dirs:
-                return
-            _watched_dirs.add(path)
-        try:
-            wd = inotify.add_watch(path, flags.OPEN)
-            watch_descriptors[wd] = path
-            logging.debug(f"Watching: {path}")
-        except Exception as e:
-            logging.error(f"Failed to add watch on {path}: {e}")
-            return
-        # Recurse into subdirectories
-        for entry in os.scandir(path):
-            if entry.is_dir(follow_symlinks=False):
-                add_watch_recursively(entry.path)
-
-    # Initial watches (only Downloads)
-    for d in initial_dirs:
-        if os.path.isdir(d):
-            add_watch_recursively(d)
-        else:
-            logging.warning(f"Initial watch directory does not exist: {d}")
-
-    logging.info(f"Open monitoring active on {_watched_dirs}")
-
-    while not stop_event.is_set():
-        # Process any pending watch requests
-        try:
-            while True:
-                new_dir = _watch_queue.get_nowait()
-                if os.path.isdir(new_dir):
-                    add_watch_recursively(new_dir)
-                else:
-                    logging.debug(f"Requested watch on non-existent dir: {new_dir}")
-        except queue.Empty:
-            pass
-
-        events = inotify.read(timeout=1000)
-        for event in events:
-            if event.mask & flags.OPEN:
-                base_path = watch_descriptors.get(event.wd)
-                if base_path:
-                    full_path = os.path.join(base_path, event.name)
-                    if os.path.isdir(full_path):
-                        continue
-                    if any(full_path.lower().endswith(ext) for ext in TEMP_EXTENSIONS):
-                        continue
-                    logging.info(f"FILE OPENED: {full_path}")
-                    now = datetime.now().isoformat()
-                    with sqlite3.connect(DB_PATH) as conn:
-                        conn.execute(''' UPDATE files SET last_accessed = ? WHERE path = ?;''', (now, full_path))
-
-    inotify.close()
-    logging.info("Open monitoring stopped.")
-
-
-# =============================
 # Daemon entrypoint
 # =============================
 
@@ -275,12 +155,11 @@ def main():
     logging.info(f"Daemon started")
     event_handler = DownloadHandler()
     observer = Observer()
-    observer.schedule(event_handler, get_downloads_dir(), recursive=False)
+    observer.schedule(event_handler, DOWNLOADS_DIR, recursive=False)
     observer.start()
     
     # --- Inotify for file‑open events (in a separate thread) ---
-    downloads_dir = get_downloads_dir()
-    initial_watch_dirs = [downloads_dir] if os.path.isdir(downloads_dir) else []
+    initial_watch_dirs = [DOWNLOADS_DIR] if os.path.isdir(DOWNLOADS_DIR) else []
 
     stop_open_event = threading.Event()
     open_thread = threading.Thread(
