@@ -111,10 +111,6 @@ def main():
                 dest_path = os.path.join(target_dir, filename)
                 shutil.move(str(filepath), dest_path)
 
-                # Add a monitor to track if the file was used
-                dest_dir = os.path.dirname(dest_path)
-                schedule_watch_directory(dest_dir)
-
                 logging.info(f"Categorized: {filename} -> {category}")
 
             except Exception as e:

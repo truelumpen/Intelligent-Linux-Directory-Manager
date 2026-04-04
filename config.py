@@ -81,7 +81,7 @@ LOG_FILE = f"{PROJECT_DIR}/download_daemon.log"
 DB_PATH = os.path.join(PROJECT_DIR, "file_tracker.db")
 MODEL_PATH = os.path.join(PROJECT_DIR, "file_classifier.pkl")
 VECTORIZER_PATH = os.path.join(PROJECT_DIR, "vectorizer.pkl")
-INACTIVE_DAYS = 1 / (24*60) # change to 3 in PROD
+INACTIVE_DAYS = 1 # / (24*60) # change to 3 in PROD
 CLEANUP_INTERVAL = 60 # Change to 600 in PROD
 TEMP_EXTENSIONS = {'.part', '.crdownload', '.tmp', '.download'}
 

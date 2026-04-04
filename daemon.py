@@ -146,6 +146,24 @@ class DownloadHandler(FileSystemEventHandler):
             logging.error(f"Error processing {filepath}: {e}")
 
 # =============================
+# Open watches once on the directories from the Cold Start
+# =============================
+
+def seed_watches_from_db():
+    """Add watches for all directories that currently contain tracked files."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            # Get unique parent directories of all tracked files
+            rows = conn.execute(
+                "SELECT DISTINCT path FROM files WHERE path IS NOT NULL"
+            ).fetchall()
+        for (dir_path,) in rows:
+            schedule_watch_directory(dir_path)
+            logging.info(f"Queued watch for directory: {dir_path}")
+    except Exception as e:
+        logging.error(f"Failed to start monitors from DB aftert Cold Start: {e}")
+
+# =============================
 # Daemon entrypoint
 # =============================
 
@@ -158,6 +176,8 @@ def main():
     observer.schedule(event_handler, DOWNLOADS_DIR, recursive=False)
     observer.start()
     
+    seed_watches_from_db()
+
     # --- Inotify for file‑open events (in a separate thread) ---
     initial_watch_dirs = [DOWNLOADS_DIR] if os.path.isdir(DOWNLOADS_DIR) else []
 
