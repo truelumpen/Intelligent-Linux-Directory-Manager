@@ -157,7 +157,8 @@ def seed_watches_from_db():
             rows = conn.execute(
                 "SELECT DISTINCT path FROM files WHERE path IS NOT NULL"
             ).fetchall()
-        for (dir_path,) in rows:
+        for (path,) in rows:
+            dir_path = os.path.dirname(path)
             schedule_watch_directory(dir_path)
             logging.info(f"Queued watch for directory: {dir_path}")
     except Exception as e:

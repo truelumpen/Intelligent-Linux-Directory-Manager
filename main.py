@@ -21,6 +21,7 @@ import subprocess
 import sys
 import os
 import shutil
+import pwd
 from pathlib import Path
 
 # =============================
@@ -47,6 +48,17 @@ VENV_DIR = ".venv"
 # =============================
 # Setup helpers
 # =============================
+
+def get_real_user_info():
+    """Resolve the real user account owning this script and its home directory."""
+    try:
+        script_stat = os.stat(__file__)
+        user_info = pwd.getpwuid(script_stat.st_uid)
+        return user_info.pw_name, user_info.pw_dir
+    except Exception:
+        return os.getlogin(), os.path.expanduser("~")
+
+REAL_USER, USER_HOME = get_real_user_info()
 
 def create_virtual_env(project_dir):
     """Create a virtual environment in the project directory."""
@@ -113,6 +125,8 @@ def write_systemd_service(project_dir, venv_path):
     """Create the systemd service file for the daemon."""
     python_path = os.path.join(venv_path, "bin", "python")
     daemon_path = os.path.join(project_dir, "daemon.py")
+    script_stat = os.stat(__file__)
+    user_info = pwd.getpwuid(script_stat.st_uid)
 
     # [UPDATE: Hansol] Clarified service description to highlight AI capabilities.
     service_content = f"""[Unit]
@@ -121,7 +135,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User={user_info.pw_name}
 WorkingDirectory={project_dir}
 ExecStart={python_path} {daemon_path}
 Restart=always
@@ -163,7 +177,7 @@ def main():
     cold_start_script = os.path.join(project_dir, "cold_start.py")
     python_path = os.path.join(venv_path, "bin", "python")
     try:
-        subprocess.run([python_path, cold_start_script], check=True, capture_output=True, text=True)
+        subprocess.run(["sudo", "-u", REAL_USER, python_path, cold_start_script], check=True, capture_output=True, text=True)
         print("Cold start completed.")
     except subprocess.CalledProcessError as e:
         print(f"Cold start failed: {e.stderr}")
