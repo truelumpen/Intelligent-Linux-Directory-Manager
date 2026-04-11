@@ -1,5 +1,17 @@
 Intelligent Linux Directory Manager
 
+*----------
+FOR UBUNTU USERS
+if you do not have python3-venv installed, you can do it with:
+`sudo apt install python3-venv`
+
+QuickStart
+`sudo python main.py`
+
+The daemon does the job with no external interraction needed. You can modify the settings in config.py
+The output logs in .log file, created automatically.
+
+
 This repo is a Python project intended to run on Linux. It watches your `~/Downloads` folder and logs new downloads, and it has a one-time “cold start” that creates category folders + captures metadata for existing files.
 
 The primary entry point is [main.py](main.py), which:
