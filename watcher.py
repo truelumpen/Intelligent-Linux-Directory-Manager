@@ -1,3 +1,17 @@
+"""
+Project: Intelligent Linux Directory Manager
+Course: CMSC 495
+Team Members: Elisei Khmelev, Han Kim, Kenneth Murray, Robert Wells, and Saad Ahmad
+
+File: watcher.py
+
+Description:
+This script handles directory watch management for the Intelligent Linux Directory
+Manager. It uses inotify to monitor the Downloads folder and any categorized
+subdirectories for file open activity, allowing the system to track when files
+are accessed. It also updates the SQLite database with the most recent access
+time so the daemon can apply retention and cleanup rules more accurately.
+"""
 # =============================
 # Standard library imports
 # =============================
