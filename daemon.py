@@ -23,16 +23,6 @@ from config import *
 from watcher import schedule_watch_directory, start_open_monitor
 
 # =============================
-# Logging configuration ?? Can it be in config?
-# =============================
-
-# Keep logging timestamps aligned with local system time.
-logging.Formatter.converter = time.localtime
-
-logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
-                    format='%(asctime)s - %(message)s')
-
-# =============================
 # Deferred retention policy notes
 # =============================
 
@@ -171,6 +161,7 @@ def seed_watches_from_db():
 def main():
     """Start filesystem monitoring and keep the daemon process alive."""
 
+    setup_logging()
     logging.info(f"Daemon started")
     event_handler = DownloadHandler()
     observer = Observer()

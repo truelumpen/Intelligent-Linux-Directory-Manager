@@ -20,21 +20,13 @@ file metadata in a SQLite database for tracking and future reference.
 from config import *
 
 # =============================
-# Logging configuration ?? Can it be in config?
-# =============================
-
-# Keep logging timestamps aligned with local system time.
-logging.Formatter.converter = time.localtime
-
-logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
-                    format='%(asctime)s - %(message)s')
-
-
-# =============================
 # Cold start workflow
 # =============================
 
 def main():
+
+    setup_logging()
+
     """Populate the tracking database using a one-time Downloads scan."""
 
     # Phase 1: Ensure the tracking table exists.

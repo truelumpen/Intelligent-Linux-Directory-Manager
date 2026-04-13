@@ -71,7 +71,16 @@ def get_real_user_info():
         return os.getlogin(), os.path.expanduser("~")
 
 # =============================
-# Paths and logging setup
+# Logging setup
+# =============================
+
+def setup_logging():
+    logging.Formatter.converter = time.localtime
+    logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
+                        format='%(asctime)s - %(message)s')
+
+# =============================
+# Paths setup
 # =============================
 
 REAL_USER, USER_HOME = get_real_user_info()

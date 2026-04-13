@@ -23,16 +23,6 @@ time so the daemon can apply retention and cleanup rules more accurately.
 from config import *
 
 # =============================
-# Logging configuration ?? Can it be in config?
-# =============================
-
-# Keep logging timestamps aligned with local system time.
-logging.Formatter.converter = time.localtime
-
-logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
-                    format='%(asctime)s - %(message)s')
-
-# =============================
 # File‑open monitoring using inotify_simple
 # =============================
 
@@ -49,6 +39,7 @@ def start_open_monitor(initial_dirs, stop_event):
     watch_descriptors = {}
 
     def add_watch_recursively(path):
+        setup_logging()
         """Add watch for IN_OPEN on path and all subdirs, skip if already watched."""
         with watched_dirs_lock:
             if path in watched_dirs:
