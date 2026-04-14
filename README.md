@@ -1,78 +1,19 @@
-Intelligent Linux Directory Manager
+<img width="1760" height="568" alt="Diagram" src="https://github.com/user-attachments/assets/885559ae-b64b-4323-a366-bfc1a1195097" />
+The work of Intelligent Linux Directory Manager in one diagram.
 
-*----------
-FOR UBUNTU USERS
-if you do not have python3-venv installed, you can do it with:
-`sudo apt install python3-venv`
+## Overview
+Many users experience a cluttered ~/Downloads folder with hundreds of files collecting dust and taking up storage space. Our solution is to organize the ~/Downloads directory once and for all, automatically sorting incoming files into the right categories. The program is capable of categorizing files into directories based on their name, extension, and MIME type. It also tracks which files remain unused and gracefully moves them to the Trash. Don't let junk files spread across your storage—use Sorty!
 
-QuickStart
-`sudo python main.py`
+## QuickStart
+On Ubuntu, you will need to install an additional dependency if you don't have it already:
+sudo apt install python3-venv
 
-The daemon does the job with no external interraction needed. You can modify the settings in config.py
-The output logs in .log file, created automatically.
+After the installation, proceed to the rest of the startup setup described below.
 
+Starting the application:
+sudo python main.py
+or
+sudo python3 main.py
 
-This repo is a Python project intended to run on Linux. It watches your `~/Downloads` folder and logs new downloads, and it has a one-time “cold start” that creates category folders + captures metadata for existing files.
-
-The primary entry point is [main.py](main.py), which:
-- Creates a Python virtual environment under `.venv/`
-- Installs Python dependencies (scikit-learn, watchdog, python-magic, joblib, pandas)
-- Ensures `libmagic` is available (needed by `python-magic`)
-- Runs the cold start script
-- Installs + enables a `systemd` service to run the daemon in the background
-
-## How to run (recommended: real Linux with systemd)
-
-Prereqs:
-- Linux with `systemd` (Ubuntu/Debian/Arch)
-- Python 3 (with `venv` support)
-- `sudo` access (because it writes a system service into `/etc/systemd/system/`)
-
-From the project directory:
-
-1) Run the installer/launcher:
-
-`sudo python3 main.py`
-
-2) Check status/logs:
-
-`systemctl status sorty-daemon`
-
-Log files are created in the project folder:
-- `download_daemon.log`
-- `downloads.txt`
-
-Cold start artifacts are also written in the project folder:
-- `.cold_start_done`
-- `existing_files.json`
-
-## How to run without systemd (dev mode)
-
-If you don’t have systemd (or don’t want to install a service), you can run the scripts directly:
-
-1) Create and activate a venv:
-
-`python3 -m venv .venv`
-`source .venv/bin/activate`
-
-2) Install deps:
-
-`pip install scikit-learn watchdog python-magic joblib pandas`
-
-3) Run cold start once:
-
-`python3 cold_start.py`
-
-4) Start the watcher (foreground):
-
-`python3 daemon.py`
-
-Stop with Ctrl+C.
-
-## Running on Windows
-
-This project uses Linux-specific features (`systemd`, the `pwd` module, and `libmagic`), so it won’t run natively on Windows.
-
-Options:
-- Use WSL2 (Ubuntu) and run in “dev mode” above. (Systemd in WSL may require extra setup depending on your Windows/WSL version.)
-- Use a Linux VM or a real Linux machine.
+## That's it!
+To adjust the automatic deletion timer or customize the categories, use the config.py file. All daemon activities are logged to a .log file in the project folder.
