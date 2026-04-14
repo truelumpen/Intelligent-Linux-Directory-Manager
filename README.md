@@ -1,4 +1,5 @@
 <img width="890" height="306" alt="Screenshot 2026-04-14 090913" src="https://github.com/user-attachments/assets/8b1ef4e0-ad85-4860-bfe7-05a93e8772e1" />
+
 The work of Intelligent Linux Directory Manager in one diagram.
 
 ## Overview
@@ -6,14 +7,14 @@ Many users experience a cluttered ~/Downloads folder with hundreds of files coll
 
 ## QuickStart
 On Ubuntu, you will need to install an additional dependency if you don't have it already:
-sudo apt install python3-venv
+`sudo apt install python3-venv`
 
 After the installation, proceed to the rest of the startup setup described below.
 
 Starting the application:
-sudo python main.py
+`sudo python main.py`
 or
-sudo python3 main.py
+`sudo python3 main.py`
 
 ## That's it!
 To adjust the automatic deletion timer or customize the categories, use the config.py file. All daemon activities are logged to a .log file in the project folder.
