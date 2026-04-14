@@ -1,4 +1,4 @@
-<img width="1760" height="568" alt="Diagram" src="https://github.com/user-attachments/assets/885559ae-b64b-4323-a366-bfc1a1195097" />
+<img width="890" height="306" alt="Screenshot 2026-04-14 090913" src="https://github.com/user-attachments/assets/8b1ef4e0-ad85-4860-bfe7-05a93e8772e1" />
 The work of Intelligent Linux Directory Manager in one diagram.
 
 ## Overview
