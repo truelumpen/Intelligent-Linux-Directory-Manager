@@ -149,7 +149,7 @@ def seed_watches_from_db():
             ).fetchall()
         for (path,) in rows:
             schedule_watch_directory(path)
-            logging.info(f"Queued watch for directory: {dir_path}")
+            logging.info(f"Queued watch for directory: {path}")
     except Exception as e:
         logging.error(f"Failed to start monitors from DB aftert Cold Start: {e}")
 
